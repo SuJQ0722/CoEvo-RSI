@@ -1,0 +1,111 @@
+extends: base.yaml
+
+project:
+  domain: rbac
+
+data:
+  loader: rbac_text2sql_jsonl
+  balanced_spider_bird: true
+  splits:
+    train: data/rbac/train.jsonl
+    val: data/rbac/val.jsonl
+    test: data/rbac/test.jsonl
+    test_bird: data/rbac/bird.jsonl
+    test_livesqlbench: data/rbac/livesqlbench.jsonl
+
+execution:
+  # RBAC rollout parsing, routing, and deterministic evaluation use the
+  # lightweight domain environment. Orchestration, harness evolution, model
+  # serving, and training stay in the caller's main Python environment.
+  environment_prefix: ${oc.env:RBAC_ENVIRONMENT_PREFIX,.venvs/rbac}
+
+model:
+  base: ${oc.env:MODEL_PATH,Qwen/Qwen3.5-9B}
+  name: ${oc.env:POLICY_MODEL,Qwen3.5-9B}
+  base_url: ${oc.env:POLICY_BASE_URL,http://127.0.0.1:8000/v1}
+
+harness:
+  kind: rbac
+  package: harnesses.rbac
+  root: harnesses/rbac
+  base: initial_harness
+  active: generated
+  max_turns: 10
+
+vllm:
+  max_model_len: 32768
+
+selection:
+  quality_metrics:
+    - safe_ex
+    - ac_f1
+  # Rank by SafeEX, then AC-F1. Mismatch breaks quality ties only;
+  # domain admission still protects both metrics and rule accuracy.
+  primary_quality_metric: safe_ex
+  mismatch_metric: interface_mismatch_turn_rate
+  mismatch_coverage_metric: complete_interface_turns
+  mismatch_improvement_epsilon: 1.0e-12
+  efficiency_metrics:
+    - llm_rate
+    - rule_rate
+    - rule_accuracy
+  rule: safe_ex_ac_f1_gate_then_minimize_llm_rate
+  epsilon: 1.0e-12
+  # Gate 1 (pre-SFT harness versus parent): allow up to one percentage point
+  # of validation noise/underfitting on each protected quality metric.
+  safe_ex_tolerance: 0.01
+  ac_f1_tolerance: 0.01
+  # LINEAGE ranks each post-SFT pair against the same pair before SFT.
+  policy_validation_tolerance: 0.005
+  promotion_split: validation
+  max_shortlisted_children: 3  # Third must be within non-policy tolerance of second.
+  max_training_candidates: 1  # One rejection-sampling/SFT path per round.
+
+meta_evolver:
+  output_dir: output/meta_evolver/rbac_balanced
+  registry_path: registries/rbac_balanced_harness_tree.json
+  evidence_mode: all
+  max_trace_items: null
+  codex:
+    multi_agent: false
+
+rollout:
+  concurrency: 32
+  attempts_per_sample: 1
+  temperature: 0.0
+  top_p: 1.0
+  top_k: null
+  max_tokens: 4096
+  reasoning_effort: high
+  enable_thinking: true
+  timeout_seconds: 300
+
+rejection_sampling:
+  attempts_per_item: 3
+  accepted_per_item: 1
+  concurrency: 32
+  # Keep strict successes and repair only evidence-backed trajectory defects.
+  quality_tier: balanced
+  # Preserve only evidence-backed model trajectories. Canonical no-reasoning
+  # gold records are not synthesized for semantic errors.
+  repair_strategy: verified_only
+  require_sql_execution: true
+  temperature: 0.7
+  score_type: binary
+  acceptance_score: 1
+  # Balance verified trajectories by discarding excess majority-label records;
+  # do not dilute tool-use supervision with synthetic no-reasoning gold records.
+  min_deny_to_allow_ratio: 1.0
+  max_deny_to_allow_ratio: 2.0
+  target_deny_to_allow_ratio: 1.0
+  balance_strategy: downsample
+  balance_seed: 42
+
+training:
+  data_curation:
+    mode: agent
+  max_length: 8192
+  sequence_parallel_size: 1
+
+paths:
+  output: output/rbac_balanced

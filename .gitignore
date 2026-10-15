@@ -1,0 +1,67 @@
+# Data & output
+*.zip
+data/
+/output
+tmp/
+archives/
+storage/
+Qwen3.5-9B/
+models/
+.venvs
+
+# Never version full or intermediate training checkpoints.
+**/checkpoint/checkpoint-*/
+**/checkpoint_sft/
+**/parent_checkpoint/
+*.ckpt
+*.safetensors
+*.bin
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Env
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+wandb/
+
+# Runtime registry synchronization
+registries/*.lock
+
+# Local training checkpoints (runtime artifacts, never committed).
+/checkpoints/
+*.pt
+
+# Local runtime artifacts and agent caches (keep the working tree clean).
+/best_who_when/
+/external/
+/.../
+/logs/
+/answer.txt
+/candidate.sql
+/database.sqlite
+/sensitivity-copy-*.json
+.pytest_cache/
+.ruff_cache/
+.agents/
+.codex/
+
+.tmux.conf

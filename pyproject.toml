@@ -1,0 +1,48 @@
+[project]
+name = "coevox"
+version = "0.1.0"
+description = "Inspect-on-demand trajectory failure detection"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "omegaconf>=2.3",
+    "pyyaml>=6.0",
+    "jsonschema>=4.18",
+    "safetensors>=0.4",
+    "torch==2.10.0",
+    "transformers==5.6.0",
+    "accelerate>=0.30",
+    "pillow>=10.0",
+    "torchvision==0.25.0",
+    "torchaudio==2.10.0",
+    "vllm==0.19.1"
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+train = [
+    "deepspeed>=0.14,<0.19",
+    "qwen-vl-utils>=0.0.14",
+    "decord",
+    "flash-linear-attention[cuda]",
+    "tilelang",
+    "openai>=1.0",
+    "pandas>=2.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "live: makes a real external API request and may incur usage charges",
+]

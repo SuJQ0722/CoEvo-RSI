@@ -1,0 +1,101 @@
+extends: base.yaml
+project:
+  domain: homebench
+evolution:
+  max_rounds: 20
+# Current continuation intentionally accepts changed data/model/harness identities.
+# Other domains remain strict because the runtime defaults each switch to true.
+resume_validation:
+  data: false
+  model: false
+  harness: false
+data:
+  loader: homebench_jsonl
+  manifest: data/homebench/manifest.json
+  splits:
+    train: data/homebench/train.jsonl
+    val: data/homebench/val.jsonl
+    test: data/homebench/test.jsonl
+  expected_counts:
+    train: 10000
+    val: 2000
+    test: 4414
+model:
+  name: ${oc.env:POLICY_MODEL,Qwen/Qwen3.5-9B}
+  revision: ${oc.env:HOMEBENCH_MODEL_FINGERPRINT,unknown}
+  base: ${oc.env:MODEL_PATH,Qwen/Qwen3.5-9B}
+  base_url: ${oc.env:POLICY_BASE_URL,http://127.0.0.1:8000/v1}
+harness:
+  kind: homebench
+  package: harnesses.homebench
+  root: harnesses/homebench
+  base: initial_harness
+  active: generated
+  max_turns: 20
+  prompt_mode: icl  # icl | zero_shot; initial harness ships four official examples.
+vllm:
+  gpu_memory_utilization: 0.95
+  tensor_parallel_size: 1
+  data_parallel_size: 4
+  max_model_len: 65536
+selection:
+  quality_metrics: [em, f1]
+  # Rank by EM, then F1. Mismatch breaks quality ties only;
+  # tolerances control admission, not ranking.
+  primary_quality_metric: em
+  mismatch_metric: interface_mismatch_turn_rate
+  mismatch_coverage_metric: complete_interface_turns
+  mismatch_improvement_epsilon: 1.0e-12
+  epsilon: 1.0e-12
+  quality_tolerance: 0.01  # One percentage point; EM/F1 are in [0, 1].
+  f1_tolerance: 0.01
+  policy_validation_tolerance: 0.01
+  promotion_split: validation
+  max_shortlisted_children: 3  # Third must be within non-policy tolerance of second.
+  max_training_candidates: 1  # One rejection-sampling/SFT path per round.
+meta_evolver:
+  output_dir: output/meta_evolver/homebench
+  registry_path: registries/homebench_harness_tree.json
+  evidence_mode: all
+  max_trace_items: null
+  generation_concurrency: 8
+  curator_guidance: >-
+    HomeBench prompt.txt and icl_examples.txt are evolvable harness assets. Use
+    validation evidence to propose prompt/ICL changes, especially for long
+    multi-operation requests, repeated reads, missing output slots, exact method
+    and argument grounding, relative-value arithmetic, and duplicate error_input
+    preservation. Prefer compact synthetic examples with explicit observed
+    evidence; never copy validation/test questions or gold answers. Every valid
+    candidate must still contain a substantive Python AST change. Encourage a
+    coordinated prompt/ICL edit when the evidence supports it, but do not require
+    prompt assets to change and do not propose prompt-only or ICL-only candidates.
+  codex:
+    multi_agent: false
+rollout:
+  concurrency: 32
+  attempts_per_sample: 1
+  temperature: 0.0
+  top_p: 1.0
+  top_k: null
+  max_tokens: 8192
+  reasoning_effort: high
+  enable_thinking: true
+  timeout_seconds: 300
+rejection_sampling:
+  attempts_per_item: 3
+  accepted_per_item: 1
+  concurrency: 32
+  quality_tier: strict
+  # Drop surplus first-attempt easy records toward the validation arity mix.
+  balance_by_val_arity: true
+  balance_reference_data: data/homebench/val.jsonl
+  balance_seed: 20260919
+  temperature: 0.7
+training:
+  data_curation:
+    mode: agent
+  max_length: 65536
+  num_processes: 4
+  sequence_parallel_size: 2
+paths:
+  output: output/homebench

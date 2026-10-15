@@ -1,0 +1,1 @@
+"""HomeBench instruction generation domain."""

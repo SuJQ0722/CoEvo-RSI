@@ -1,0 +1,149 @@
+extends: base.yaml
+
+project:
+  domain: who_when
+
+evolution:
+  max_rounds: 20
+
+# This continuation intentionally resumes the existing checkpoint/harness after
+# changing all three identities. Runtime defaults remain strict for domains
+# which do not opt out explicitly.
+resume_validation:
+  data: false
+  model: false
+  harness: false
+
+harness:
+  kind: failure_detection
+  package: harnesses.who_when
+  root: harnesses/who_when
+  base: initial_harness
+  active: generated
+  max_turns: 20
+  tools:
+    - inspect
+    - final_answer
+
+selection:
+  # Who&When validation/test share the official Agent Accuracy and Step
+  # Accuracy attribution protocol.
+  quality_metrics:
+    - agent_accuracy
+    - step_accuracy
+  # Validation ranking: Step=70%, Agent=30%.
+  # Admission still uses the overall per-metric tolerances below.
+  ranking_metric_groups:
+    - [agent_accuracy, step_accuracy]
+  ranking_metric_weights:
+    agent_accuracy: 3
+    step_accuracy: 7
+  mismatch_metric: interface_mismatch_turn_rate
+  mismatch_coverage_metric: complete_interface_turns
+  mismatch_improvement_epsilon: 1.0e-12
+  quality_tolerance: 5  # Five percentage points on the official 0–100 metric scale.
+  policy_validation_tolerance: 1  # 0.01 on the official 0–100 metric scale
+  promotion_split: validation
+  coverage_target: 0.80
+  coverage_is_hard_gate: false
+  max_shortlisted_children: 3  # Third must be within non-policy tolerance of second.
+  max_training_candidates: 1  # One rejection-sampling/SFT path per round.
+  rule: any_improves_no_regression
+  epsilon: 1.0e-12
+  tolerances:
+    agent_accuracy: 5
+    step_accuracy: 5
+
+meta_evolver:
+  output_dir: output/meta_evolver/who_when
+  registry_path: registries/harness_tree.json
+  curator_guidance: >-
+    Follow the failure-diagnosis priorities in inputs.domain_contract and carry
+    the supported mechanisms into target.current_failures and design_requirements.
+    Compare validation sources, long and short traces, and multi-agent cases separately.
+    Distinguish missing evidence from inspected-but-wrong attribution; when SFT
+    evidence is supplied, separate joint regression from a subset tradeoff and
+    count unique difficult training cases rather than only duplicated rows.
+    Record missing evidence in evidence_limits and require targeted checks in
+    candidate briefs. Do not treat these possible causes as established facts.
+    When the evidence shows long-trajectory budget pressure, treat efficient
+    context retention as an open design axis for the Editors. Encourage a
+    minimal policy that preserves decision-relevant evidence while compacting
+    or retiring low-value history, without prescribing one architecture. Any
+    model-assisted condensation must reuse the already configured model,
+    provider, and environment settings rather than introduce another model,
+    credential, or service. The incumbent's bounded global-to-local inspection
+    scheduler is only a seed: Editors may adjust or replace its heuristics when
+    validation evidence supports doing so, provided summary privacy, bounded
+    context growth, and a valid final submission are preserved.
+
+vllm:
+  max_model_len: 65536
+
+rollout:
+  concurrency: 32
+  max_tokens: 8192
+  reasoning_effort: high
+  enable_thinking: true
+
+data:
+  loader: who_when
+  splits:
+    train: data/whowhen/train.jsonl
+    val: data/whowhen/val.jsonl
+    test: data/whowhen/test_whowhen.jsonl
+    test_traceelephant: data/whowhen/test_traceelephant.jsonl
+    test_whowhen_pro: data/whowhen/test_whowhen_pro.jsonl
+
+# Who&When inspects stored trajectories and does not execute task code.
+execution:
+  backend: none
+
+paths:
+  output: output/who_when
+
+rejection_sampling:
+  concurrency: 32
+  require_inspection: true
+  # Preserve every accepted rollout. Before SFT, repeat only multi-attempt
+  # successes when doing so moves structural difficulty (length,
+  # decisive-error position, agent count) toward the validation split.
+  balance_by_val_difficulty: true
+  balance_reference_data: data/whowhen/val.jsonl
+  balance_seed: 20260919
+  balance_max_growth_fraction: 0.5
+  balance_max_repeats_per_record: 3
+  balance_axis_weights:
+    trace_length: 1.0
+    decisive_position: 2.0
+    agent_count: 1.0
+  # Keep only exact native-label matches; no summary/repair is used.
+  quality_tier: strict
+  repair_strategy: none
+
+training:
+  data_curation:
+    mode: agent
+    principles: >-
+      Target decisive-step attribution, with Step weighted more than Agent. Inspect trace_length, agent_count and
+      decisive_position cohorts before setting counts. Prioritize coverage of
+      independent long traces (>20 steps, especially >40), >=5-agent cases and
+      early causal failures with downstream distractors. Inspect their available
+      trajectories for causal evidence and exact final step/agent mapping;
+      an inspected step or a correct final label alone does not prove good reasoning.
+      Retain every valid protected hard record, but allocate additional repeats
+      across diverse sample_ids and sources; do not amplify dubious reasoning.
+      Preserve a meaningful short-trace (<=10 steps) mixture; do not turn this
+      into long-trace-only training. Match observable structure, not source names.
+      Inspect the intersection of long traces and many agents, not just marginal
+      counts. Use unique_samples and unique_records as well as physical records
+      when choosing repeats; duplication cannot create missing task diversity.
+      Account for training_constraints and reasoning length: character
+      counts are not token counts, and actual truncation requires evidence.
+      In the submitted rationale report cohort sizes, independent coverage,
+      repeat allocation, short-trace retention, unavailable cohorts and evidence
+      limits. Current per-subset model errors are not supplied here; do not invent
+      error rates or claim the mixture has already improved SFT performance.
+      Use only validated training records, preserve original messages and labels,
+      maintain the minimum record count and pass all existing overlap/format gates.
+  max_length: 65536

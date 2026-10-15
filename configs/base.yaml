@@ -1,0 +1,150 @@
+model:
+  # Hugging Face model ID or a path supplied with MODEL_PATH/--model-path.
+  base: ${oc.env:MODEL_PATH,Qwen/Qwen3.5-9B}
+  base_url: ${POLICY_BASE_URL}
+
+vllm:
+  command: ${oc.env:VLLM_COMMAND,vllm}
+  host: 127.0.0.1
+  port: 8000
+  max_model_len: ${oc.decode:${oc.env:MAX_MODEL_LEN,65536}}
+  startup_timeout_seconds: 900
+  shutdown_timeout_seconds: 60
+  cleanup_timeout_seconds: 10
+  gpu_memory_utilization: ${oc.decode:${oc.env:GPU_MEMORY_UTILIZATION,0.8}}
+  tensor_parallel_size: ${oc.decode:${oc.env:TENSOR_PARALLEL_SIZE,1}}
+  data_parallel_size: ${oc.decode:${oc.env:DATA_PARALLEL_SIZE,4}}
+  dtype: auto
+  extra_args:
+    - "--enable-auto-tool-choice"
+    - "--tool-call-parser"
+    - "qwen3_coder"
+    - "--reasoning-parser"
+    - "qwen3"
+
+evolution:
+  # Run at most ten evolution rounds, subject to the patience limit below.
+  max_rounds: 10
+  # Each whole round that retains the parent consumes one patience unit,
+  # including rounds with no passing child before training. Accepting a new
+  # model/harness pair (pre- or post-SFT) resets the counter.
+  policy_rollback_patience: 3
+
+# Harness and model modes are independent; all combinations share prefilter/SFT.
+inheritance:
+  harness:
+    # Component overrides take precedence over the legacy shared YAML/env mode.
+    mode: agent # agent | predefined
+    max_references: 5 # historical harnesses; incumbent is always available separately
+    strategy: failure_similarity # predefined only: failure_similarity | recent
+  model:
+    mode: agent # agent | predefined
+    predefined:
+      top_k: 3 # exactly K distinct non-base donors; insufficient history skips merging
+      density: 0.2 # TIES keeps the largest 20% of each tensor's task-vector entries
+      scale: 1.0
+    agent:
+      # Per shortlisted harness; latest prefilter evaluation is already available.
+      max_actions: 12
+      max_evaluations: 8 # requested single/merged evaluations, excluding latest prefilter
+      max_merges: 3
+      max_merge_parents: 4
+      merge_methods: [ties, linear]
+
+rollout:
+  # Evaluate independent val/test trajectories concurrently against vLLM.
+  concurrency: 16
+  # Qwen3.5 thinking-mode defaults. `medium` is bounded by max_tokens and the
+  # per-request timeout so a slow request does not create an unbounded run.
+  temperature: 1.0
+  top_p: 0.95
+  top_k: 20
+  max_tokens: 6144
+  reasoning_effort: medium  # none | low | medium | high
+  enable_thinking: true
+  timeout_seconds: 300
+  attempts_per_sample: 5
+
+meta_evolver:
+  backend: codex  # codex | claude
+  trace_path: output/baseline.jsonl
+  output_dir: output/meta_evolver
+  registry_path: registries/harness_tree.json
+  # Give the MetaAgent a read-only trajectory directory and let it select a
+  # bounded representative sample instead of preselecting records for it.
+  evidence_mode: trajectory_directory
+  max_trace_items: null
+  # Generate one batch of eight independent child harnesses with eight Editors.
+  max_attempts_per_round: 8
+  proposal_batch_size: 8
+  generation_concurrency: 8
+  batch_summary_timeout_seconds: 1800
+  text_output_attempts: 3  # Retry a successful MetaAgent process with no final answer.
+  timeout_seconds: 7200
+
+  codex:
+    command: codex
+    model: deepseek-flash
+    base_url: ${OPENAI_BASE_URL}
+    api_key_env: OPENAI_API_KEY
+    api_key: ${OPENAI_API_KEY}
+    sandbox: workspace-write
+    ephemeral: true
+    reasoning_effort: high
+    web_search: true  # Codex searches when useful; the prompt explicitly encourages it.
+    extra_args: []
+
+  claude:
+    command: claude
+    api_key_env: ANTHROPIC_API_KEY
+    api_key: ${ANTHROPIC_API_KEY}
+    external_sandbox: false  # fail closed until the launcher enforces candidate-only writes
+    permission_mode: acceptEdits
+    extra_args: []
+
+rejection_sampling:
+  # Each domain defines its acceptance and optional curation rules.
+  attempts_per_item: 3
+  accepted_per_item: 1
+  concurrency: 16
+  quality_tier: strict
+  temperature: 0.7
+
+training:
+  data_curation:
+    mode: heuristic  # Built-in domains opt into the shared agent curator.
+    min_records: 1000  # Physical rows; valid hard examples may be repeated.
+    max_attempts: 3
+    fallback_to_heuristic: true
+  backend: ms_swift
+  submodule_path: ms-swift
+  method: ms_swift_sft
+  tuner_type: full
+  # Full-tune the language policy; the unused Qwen3.5 vision path stays frozen.
+  freeze_vit: true
+  freeze_aligner: true
+  epochs: 1
+  learning_rate: 5.0e-6
+  batch_size: 1
+  # Four GPUs form 2 sequence-parallel groups, leaving DP=2.
+  # Global batch size: 1 sample/DP replica * DP 2 * 4 accumulation steps = 8.
+  gradient_accumulation_steps: 4
+  # Match the maximum rollout trajectory length. Drop rare over-limit records:
+  # ms-swift only supports `split` for pre-training, not conversational SFT.
+  max_length: 65536
+  truncation_strategy: delete
+  loss_scale: default
+  agent_template: qwen3_5
+  torch_dtype: bfloat16
+  gradient_checkpointing: true
+  num_processes: 4
+  sequence_parallel_size: 2
+  padding_free: false
+  celoss_parallel_size: 2048
+  deepspeed: zero3
+  dataset_num_proc: 4
+  dataloader_num_workers: 4
+  logging_steps: 1
+  optimizer: adamw_torch
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.03

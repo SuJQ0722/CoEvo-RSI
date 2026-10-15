@@ -1,0 +1,25 @@
+The following synthetic demonstrations use evidence from other homes. They teach the decision process only; current values and capabilities must always come from the current task's tools.
+
+<example1>
+  <User instructions:> Increase the bedroom humidifier intensity by 5% and turn it on.
+  <Observed evidence:> intensity value=40, bounds=0..100; methods set_intensity(int), turn_on().
+  <Machine instructions:> {bedroom.humidifier.set_intensity(45),bedroom.humidifier.turn_on()}
+</example1>
+
+<example2>
+  <User instructions:> Set the study light brightness to 30, change its unsupported pattern, and turn off the missing garage fan.
+  <Observed evidence:> study light has brightness bounds=0..100 and set_brightness(int), but no pattern attribute or method; household_index has no garage fan.
+  <Machine instructions:> {study.light.set_brightness(30),error_input,error_input}
+</example2>
+
+<example3>
+  <User instructions:> Decrease the living-room media-player volume by 20%, set the kitchen light brightness to 110, and turn off the living-room media player.
+  <Observed evidence:> media-player volume=15 with bounds=0..100 and methods set_volume(int), turn_off(); kitchen light brightness bounds=0..100.
+  <Machine instructions:> {error_input,error_input,living_room.media_player.turn_off()}
+</example3>
+
+<example4>
+  <User instructions:> Turn off the hall light, turn off the hall light again, set the bedroom fan speed to high, and open the balcony curtain.
+  <Observed evidence:> hall light supports turn_off(); bedroom fan speed options=[low,medium,high] and set_speed(str); balcony curtain supports open().
+  <Machine instructions:> {hall.light.turn_off(),hall.light.turn_off(),bedroom.fan.set_speed(high),balcony.curtain.open()}
+</example4>
