@@ -2,8 +2,8 @@
 
 # CoEvoX: When Harnesses Evolve, Which Models Should Follow?
 
-[![arXiv](https://img.shields.io/badge/arXiv-coming%20soon-b31b1b)](#)
-[![HuggingFace](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-CoEvo--RSI-yellow)](https://huggingface.co/collections/nullptr04/coevo-rsi-6ad087479a4180c79495cdc9)
+[![arXiv](https://img.shields.io/badge/arXiv-2610.25078-b31b1b)](https://arxiv.org/abs/2610.25078)
+[![HuggingFace](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-CoEvo--RSI-yellow)](https://huggingface.co/collections/nullptr04/coevo-rsi)
 
 </div>
 
@@ -115,6 +115,60 @@ Fill in the following variables in `.env`:
 The meta-agent runs through the Codex CLI, which must be available on `PATH`.
 
 Place the datasets under `data/`, following the paths in `configs/{who_when,rbac,homebench}.yaml`. The supported datasets are Who&When, Who&When Pro, TraceElephant, RBAC-Text2SQL (Spider and BIRD), and HomeBench.
+
+## Evaluating the Released Checkpoints
+
+We release the final co-evolved model for each domain in the [Hugging Face collection](https://huggingface.co/collections/nullptr04/coevo-rsi). Each one is Qwen3.5-9B after full-parameter SFT. Each model is paired with the final evolved harness of its domain, `harnesses/<domain>/generated/`. The same harness is also copied into the `harness/` folder of each Hugging Face repo. **Always evaluate a released checkpoint with the `generated` harness.**
+
+| Domain | Checkpoint | Harness | Evaluation script |
+| --- | --- | --- | --- |
+| Failure attribution | [`nullptr04/CoEvo-RSI-who-when`](https://huggingface.co/nullptr04/CoEvo-RSI-who-when) | `harnesses/who_when/generated` | `scripts/run_whowhen_full_test.sh` |
+| Role-aware text-to-SQL | [`nullptr04/CoEvo-RSI-rbac`](https://huggingface.co/nullptr04/CoEvo-RSI-rbac) | `harnesses/rbac/generated` | `scripts/run_rbac_full_test.sh` |
+| Smart-home instructions | [`nullptr04/CoEvo-RSI-homebench`](https://huggingface.co/nullptr04/CoEvo-RSI-homebench) | `harnesses/homebench/generated` | `scripts/run_homebench_full_test.sh` |
+
+To evaluate a checkpoint, you need the [Setup](#setup) steps above, the datasets under `data/`, and, for RBAC, the `.venvs/rbac` environment. You do not need the meta-agent endpoint or the Codex CLI.
+
+**1. Download and serve the checkpoint.** Use the same vLLM flags as co-evolution (`configs/base.yaml`). The tool-call and reasoning parsers are required, because the harnesses talk to the model through tool calls.
+
+```bash
+DOMAIN_CKPT=who-when   # or: rbac, homebench
+huggingface-cli download nullptr04/CoEvo-RSI-${DOMAIN_CKPT} --local-dir ckpts/CoEvo-RSI-${DOMAIN_CKPT}
+
+CUDA_VISIBLE_DEVICES=0 vllm serve ckpts/CoEvo-RSI-${DOMAIN_CKPT} \
+  --host 127.0.0.1 --port 8000 \
+  --served-model-name CoEvo-RSI-${DOMAIN_CKPT} \
+  --max-model-len 65536 \
+  --enable-auto-tool-choice --tool-call-parser qwen3_coder \
+  --reasoning-parser qwen3
+# With more GPUs, add e.g. --data-parallel-size 4 and list the GPUs in CUDA_VISIBLE_DEVICES.
+```
+
+**2. Run the evaluation in another shell.** The scripts read the model from `POLICY_BASE_URL` (default `http://127.0.0.1:8000/v1`) and detect the served model ID automatically. Each script runs one test split. To run another split, set `TEST_DATA`. Also give every split its own `OUTPUT_ROOT`: the scripts resume from existing predictions, so two splits that share an output directory would be mixed.
+
+```bash
+# Failure attribution: Who&When (Hand-Crafted + Algorithm-Generated), Who&When Pro, TraceElephant
+bash scripts/run_whowhen_full_test.sh generated
+TEST_DATA=data/whowhen/test_whowhen_pro.jsonl   OUTPUT_ROOT=output/who_when/full_test_pro \
+  bash scripts/run_whowhen_full_test.sh generated
+TEST_DATA=data/whowhen/test_traceelephant.jsonl OUTPUT_ROOT=output/who_when/full_test_traceelephant \
+  bash scripts/run_whowhen_full_test.sh generated
+
+# Role-aware text-to-SQL: Spider (in-distribution) and BIRD (out-of-distribution)
+bash scripts/run_rbac_full_test.sh generated
+TEST_DATA=data/rbac/bird.jsonl OUTPUT_ROOT=output/rbac/full_test_bird \
+  bash scripts/run_rbac_full_test.sh generated
+
+# Smart-home instruction following: HomeBench
+bash scripts/run_homebench_full_test.sh generated
+```
+
+**3. Read the results.** Each run writes `samples.jsonl` and `metrics.json` to `<OUTPUT_ROOT>/generated/`. The metrics correspond to the [Main Results](#main-results) tables as follows:
+
+- **Who&When:** agent and step accuracy, overall and per benchmark split under `by_split` (e.g. Hand-Crafted and Algorithm-Generated).
+- **RBAC:** Safe-EX, AC-F1, Safe-Deny, and violation rate. The script also prints them as a `RESULT` line.
+- **HomeBench:** overall EM and F1, plus `per_type` scores. The `VM` and `IM` entries are the valid and invalid multi-device instructions.
+
+For the BIRD split, the SQLite databases are found automatically under `data/RBAC-Text2SQL-Benchmark-official/data/Bird/dev_20251106/dev_databases/`.
 
 ## Co-Evolution
 
