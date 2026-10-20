@@ -72,51 +72,47 @@ The paper contains the full baseline tables and the ablation, cost, and inherita
 ## Repository Structure
 
 ```text
-CoEvoX/
+CoEvo-RSI/
 |-- src/
 |   |-- meta_evolver/      # co-evolution loop: archive, Curator/Editors, model inheritance, promotion
 |   |-- domains/           # task plugins: who_when/, rbac/, homebench/
-|   |-- training/          # rejection sampling and full-parameter SFT (ms-swift)
+|   |-- training/          # rejection sampling and full-parameter SFT
 |   |-- diagnostics/       # TIMR / interface-mismatch statistics
 |   |-- runner/            # model client, vLLM lifecycle, pair evaluation
 |   `-- traces/, utils/
 |-- harnesses/             # initial and final evolved harness per domain
-|-- configs/               # base.yaml, who_when/rbac/homebench.yaml, rbac_environment.yaml
-|-- scripts/               # co-evolution and pair-evaluation entry points
+|-- configs/               # who_when/rbac/homebench.yaml, rbac_environment.yaml
+|-- scripts/               # evaluation entry points (run_*_full_test.sh)
 |-- docs/                  # per-domain task and harness design (who_when, rbac, homebench)
 |-- assets/                # figures
-|-- ms-swift/              # training framework (cloned during setup)
 `-- tests/
 ```
 
 ## Setup
 
+All commands below are run from the repository root (`CoEvo-RSI/`).
+
 ```bash
-cd CoEvoX
-git clone https://github.com/modelscope/ms-swift.git ms-swift
-git -C ms-swift checkout 1a7977b7f36025b0bb7528ec121cd3feac3032e3
+git clone https://github.com/SuJQ0722/CoEvo-RSI.git
+cd CoEvo-RSI
 
 conda create -n coevox python=3.10 -y
 conda activate coevox
-python -m pip install -e '.[train,dev]'
-python -m pip install -e ms-swift
-cp .env.example .env
+python -m pip install -e .
 
 # RBAC task execution and SQL evaluation run in a separate environment
 conda env create --prefix .venvs/rbac --file configs/rbac_environment.yaml
 ```
 
-Fill in the following variables in `.env`:
+Place the datasets under `data/` in the repository root, at the paths listed in `configs/{who_when,rbac,homebench}.yaml`:
 
-- the meta-agent endpoint (`OPENAI_BASE_URL`, `OPENAI_API_KEY`);
-- the task-model endpoint (`POLICY_BASE_URL`);
-- `MODEL_PATH`, which points to your local Qwen3.5-9B weights.
+| Domain | Test files | Databases |
+| --- | --- | --- |
+| Failure attribution | `data/whowhen/test_whowhen.jsonl`, `data/whowhen/test_whowhen_pro.jsonl`, `data/whowhen/test_traceelephant.jsonl` | – |
+| Role-aware text-to-SQL | `data/rbac/test.jsonl` (Spider), `data/rbac/bird.jsonl` (BIRD) | `data/spider/database/`, `data/RBAC-Text2SQL-Benchmark-official/data/Bird/dev_20251106/dev_databases/` |
+| Smart-home instructions | `data/homebench/test.jsonl` | – |
 
-The meta-agent runs through the Codex CLI, which must be available on `PATH`.
-
-Place the datasets under `data/`, following the paths in `configs/{who_when,rbac,homebench}.yaml`. The supported datasets are Who&When, Who&When Pro, TraceElephant, RBAC-Text2SQL (Spider and BIRD), and HomeBench.
-
-## Evaluating the Released Checkpoints
+## Inference with the Released Checkpoints
 
 We release the final co-evolved model for each domain in the [Hugging Face collection](https://huggingface.co/collections/nullptr04/coevo-rsi). Each one is Qwen3.5-9B after full-parameter SFT. Each model is paired with the final evolved harness of its domain, `harnesses/<domain>/generated/`. The same harness is also copied into the `harness/` folder of each Hugging Face repo. **Always evaluate a released checkpoint with the `generated` harness.**
 
@@ -126,9 +122,7 @@ We release the final co-evolved model for each domain in the [Hugging Face colle
 | Role-aware text-to-SQL | [`nullptr04/CoEvo-RSI-rbac`](https://huggingface.co/nullptr04/CoEvo-RSI-rbac) | `harnesses/rbac/generated` | `scripts/run_rbac_full_test.sh` |
 | Smart-home instructions | [`nullptr04/CoEvo-RSI-homebench`](https://huggingface.co/nullptr04/CoEvo-RSI-homebench) | `harnesses/homebench/generated` | `scripts/run_homebench_full_test.sh` |
 
-To evaluate a checkpoint, you need the [Setup](#setup) steps above, the datasets under `data/`, and, for RBAC, the `.venvs/rbac` environment. You do not need the meta-agent endpoint or the Codex CLI.
-
-**1. Download and serve the checkpoint.** Use the same vLLM flags as co-evolution (`configs/base.yaml`). The tool-call and reasoning parsers are required, because the harnesses talk to the model through tool calls.
+**1. Download and serve the checkpoint.** The tool-call and reasoning parsers are required, because the harnesses talk to the model through tool calls. The checkpoint is downloaded to `ckpts/` under the repository root.
 
 ```bash
 DOMAIN_CKPT=who-when   # or: rbac, homebench
@@ -143,7 +137,7 @@ CUDA_VISIBLE_DEVICES=0 vllm serve ckpts/CoEvo-RSI-${DOMAIN_CKPT} \
 # With more GPUs, add e.g. --data-parallel-size 4 and list the GPUs in CUDA_VISIBLE_DEVICES.
 ```
 
-**2. Run the evaluation in another shell.** The scripts read the model from `POLICY_BASE_URL` (default `http://127.0.0.1:8000/v1`) and detect the served model ID automatically. Each script runs one test split. To run another split, set `TEST_DATA`. Also give every split its own `OUTPUT_ROOT`: the scripts resume from existing predictions, so two splits that share an output directory would be mixed.
+**2. Run the evaluation in another shell.** The scripts read the model from `POLICY_BASE_URL` (default `http://127.0.0.1:8000/v1`) and detect the served model ID automatically. Each script runs one test split. To run another split, set `TEST_DATA`. Also give every split its own `OUTPUT_ROOT`: the scripts resume from existing predictions, so two splits that share an output directory would be mixed. Relative `TEST_DATA` and `OUTPUT_ROOT` paths are resolved against the repository root.
 
 ```bash
 # Failure attribution: Who&When (Hand-Crafted + Algorithm-Generated), Who&When Pro, TraceElephant
@@ -162,44 +156,13 @@ TEST_DATA=data/rbac/bird.jsonl OUTPUT_ROOT=output/rbac/full_test_bird \
 bash scripts/run_homebench_full_test.sh generated
 ```
 
-**3. Read the results.** Each run writes `samples.jsonl` and `metrics.json` to `<OUTPUT_ROOT>/generated/`. The metrics correspond to the [Main Results](#main-results) tables as follows:
+**3. Read the results.** Each run writes `samples.jsonl` and `metrics.json` to `<OUTPUT_ROOT>/generated/` (by default `output/<domain>/full_test/generated/`). The metrics correspond to the [Main Results](#main-results) tables as follows:
 
 - **Who&When:** agent and step accuracy, overall and per benchmark split under `by_split` (e.g. Hand-Crafted and Algorithm-Generated).
 - **RBAC:** Safe-EX, AC-F1, Safe-Deny, and violation rate. The script also prints them as a `RESULT` line.
 - **HomeBench:** overall EM and F1, plus `per_type` scores. The `VM` and `IM` entries are the valid and invalid multi-device instructions.
 
 For the BIRD split, the SQLite databases are found automatically under `data/RBAC-Text2SQL-Benchmark-official/data/Bird/dev_20251106/dev_databases/`.
-
-## Co-Evolution
-
-```bash
-# Dry run (no GPU, weights, or API calls)
-ROUNDS=1 bash scripts/run.sh --dry-run
-
-# Run co-evolution for one domain
-CUDA_VISIBLE_DEVICES=0,1,2,3 bash scripts/run_whowhen.sh
-CUDA_VISIBLE_DEVICES=0,1,2,3 bash scripts/run_rbac.sh
-CUDA_VISIBLE_DEVICES=0,1,2,3 bash scripts/run_homebench.sh
-
-# Resume a round
-bash scripts/run.sh --domain who_when --resume <round_id>
-```
-
-Harness and model inheritance are configured independently in `configs/base.yaml`. Each side is set to either `agent` (the meta-agent decides) or `predefined` (fixed rules).
-
-## Evaluating a Model–Harness Pair
-
-```bash
-# Evaluate the pair promoted in a round of your own co-evolution run (vLLM is managed automatically)
-CUDA_VISIBLE_DEVICES=0,1,2,3 bash scripts/run_evolved_full_test.sh <round_id>
-
-# Evaluate a model already served at POLICY_BASE_URL with a harness (initial_harness or generated)
-bash scripts/run_whowhen_full_test.sh   generated
-bash scripts/run_rbac_full_test.sh      generated
-bash scripts/run_homebench_full_test.sh generated
-```
-
-Each domain ships two harnesses under `harnesses/<domain>/`: `initial_harness/` and the final evolved harness `generated/` (the default `harness.active` in each config). Candidates from new co-evolution runs are written to `candidates/`. Results are written to `output/<domain>/full_test/`. Each evaluation also reports TIMR in `mismatch.json`.
 
 ## Acknowledgments
 
